@@ -286,8 +286,8 @@
  * Others
  *-----------*/
 
-#define LV_ENABLE_GLOBAL_CUSTOM 0
-#if LV_ENABLE_GLOBAL_CUSTOM
+#define LV_ENABLE_GLOBAL_CUSTOM 0  //jg CHANGED 0 - 1
+#if LV_ENABLE_GLOBAL_CUSTOM 
     /*Header to include for the custom 'lv_global' function"*/
     #define LV_GLOBAL_CUSTOM_INCLUDE <stdint.h>
 #endif
@@ -430,7 +430,7 @@
 #define LV_FONT_CUSTOM_DECLARE
 
 /*Always set a default font*/
-#define LV_FONT_DEFAULT &lv_font_montserrat_14
+#define LV_FONT_DEFAULT &lv_font_montserrat_16 // jg was 14
 
 /*Enable handling large font and/or fonts with a lot of characters.
  *The limit depends on the font size, font face and bpp.
@@ -499,6 +499,8 @@
 #define LV_USE_ARC        1
 
 #define LV_USE_BAR        1
+
+#define LV_USE_METER        1
 
 #define LV_USE_BUTTON        1
 
@@ -917,7 +919,7 @@
 #define LV_USE_ST7735		0
 #define LV_USE_ST7789		0
 #define LV_USE_ST7796		0
-#define LV_USE_ILI9341		1
+#define LV_USE_ILI9341_2		1
 
 #define LV_USE_GENERIC_MIPI (LV_USE_ST7735 | LV_USE_ST7789 | LV_USE_ST7796 | LV_USE_ILI9341)
 
