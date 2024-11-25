@@ -47,7 +47,7 @@
 #define SMOOTH_FONT
 
 // Color order
-#define TFT_RGB_ORDER TFT_BGR  // Color order Blue-Green-Red JG WORKED WITH 'BGR' GOOD
+#define TFT_RGB_ORDER TFT_BGR 
 
 // Optional SPI transactions
 #define SUPPORT_TRANSACTIONS
