@@ -18,7 +18,6 @@
 #include <EEPROM.h>
 #include <ESP32Time.h>
 
-
 // Pin Definitions
 #define XPT2046_IRQ 36
 #define XPT2046_MOSI 13
