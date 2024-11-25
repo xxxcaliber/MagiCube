@@ -1,148 +1,131 @@
+//#include <PCA9685.h>
+//#include <SPIFFS.h>
+//#include <ArduinoJson.h>
+//#include "config.h"
+//#include "controls.h"
+//#include "display.h"
+//#include "sensors.h"
+
+// MagiCube_Gro_Env_v7-2.ino
+
+#include "main_gui.h"
 #include <lvgl.h>
 #include <TFT_eSPI.h>
+#include <SPI.h>
 #include <XPT2046_Touchscreen.h>
 #include <Wire.h>
 #include <Adafruit_BME280.h>
-#include <PCA9685.h>
-#include <SPIFFS.h>
-#include <ArduinoJson.h>
-#include "config.h"
-#include "controls.h"
-#include "display.h"
-#include "sensors.h"
+#include <EEPROM.h>
+#include <ESP32Time.h>
 
-// Add this function prototype at the top
-void my_disp_flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map);
-void my_touchpad_read(lv_indev_t *indev, lv_indev_data_t *data);
 
-// Global variables
-lv_display_t * disp = NULL;
-lv_indev_t * touch_indev = NULL;
+// Pin Definitions
+#define XPT2046_IRQ 36
+#define XPT2046_MOSI 13
+#define XPT2046_MISO 12
+#define XPT2046_CLK 14
+#define XPT2046_CS 33
+#define TFT_BL 27
 
-// Rest of your code remains the same...
-// Forward declarations of event callbacks
-void led_btn_event_cb(lv_event_t * e);
-void mist_btn_event_cb(lv_event_t * e);
-void fan_slider_event_cb(lv_event_t * e);
+// PWM Configuration for backlight
+#define TFT_BL_PWM_CHANNEL 0
+#define TFT_BL_PWM_FREQ 5000
+#define TFT_BL_PWM_RESOLUTION 8
+#define TFT_BL_PWM_MAX_DUTY 255
 
-// Component initialization
-TFT_eSPI tft = TFT_eSPI();
+// Screen Configuration
+#define SCREEN_WIDTH 240
+#define SCREEN_HEIGHT 320
+#define DRAW_BUF_SIZE (SCREEN_WIDTH * SCREEN_HEIGHT / 10 * (LV_COLOR_DEPTH / 8))
+
+// Global Objects
+SPIClass touchscreenSPI = SPIClass(VSPI);
 XPT2046_Touchscreen touchscreen(XPT2046_CS, XPT2046_IRQ);
 Adafruit_BME280 bme;
-PCA9685 pwm;
+ESP32Time rtc;
 
-// LVGL objects
-lv_obj_t *main_screen;
-lv_obj_t *temp_label;
-lv_obj_t *humid_label;
-lv_obj_t *pressure_label;
-lv_obj_t *temp_arc;
-lv_obj_t *humid_arc;
-lv_obj_t *device_panel;
-lv_obj_t *chart;
-lv_chart_series_t *temp_series;
-lv_chart_series_t *humid_series;
+// Buffer for LVGL
+uint32_t draw_buf[DRAW_BUF_SIZE / 4];
 
-// System state
-struct {
-    bool mist_active;
-    bool led_active;
-    bool fan_active;
-    float temperature;
-    float humidity;
-    float pressure;
-    uint32_t last_sensor_read;
-    uint32_t last_data_log;
-} state = {0};
+// Touch coordinates
+int x, y, z;
+
+// Logging callback for LVGL
+void log_print(lv_log_level_t level, const char * buf) {
+    LV_UNUSED(level);
+    Serial.println(buf);
+    Serial.flush();
+}
+
+// Touchscreen reading callback for LVGL
+void touchscreen_read(lv_indev_t * indev, lv_indev_data_t * data) {
+    if(touchscreen.tirqTouched() && touchscreen.touched()) {
+        TS_Point p = touchscreen.getPoint();
+        x = map(p.x, 200, 3700, 1, SCREEN_WIDTH);
+        y = map(p.y, 3800, 240, 1, SCREEN_HEIGHT);
+        z = p.z;
+
+        data->state = LV_INDEV_STATE_PRESSED;
+        data->point.x = x;
+        data->point.y = y;
+    }
+    else {
+        data->state = LV_INDEV_STATE_RELEASED;
+    }
+}
 
 void setup() {
     Serial.begin(115200);
-    
-    // Initialize display and touch
-    init_display();
-    init_touch();
-    
-    // Initialize sensors and controls
-    init_sensors();
-    init_controls();
-    
-    // Create the UI
-    create_ui();
-    
-    // Initialize state
-    state.last_sensor_read = 0;
-    state.last_data_log = 0;
+    Wire.begin(21, 22); // Initialize I2C for BME280
 
-    Serial.println("Setup complete!");
+    // Initialize backlight
+    pinMode(TFT_BL, OUTPUT);
+    ledcAttach(TFT_BL, TFT_BL_PWM_FREQ, TFT_BL_PWM_RESOLUTION);
+    ledcWrite(TFT_BL, TFT_BL_PWM_MAX_DUTY);
+
+    // Initialize BME280
+    if (!bme.begin(0x76)) {
+        Serial.println("Could not find BME280 sensor!");
+    }
+
+    // Initialize LVGL
+    lv_init();
+    lv_log_register_print_cb(log_print);
+
+    // Initialize touchscreen
+    touchscreenSPI.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
+    touchscreen.begin(touchscreenSPI);  // Changed this line
+    touchscreen.setRotation(1);
+
+    // Initialize display
+    lv_display_t * disp;
+    disp = lv_tft_espi_create(SCREEN_WIDTH, SCREEN_HEIGHT, draw_buf, sizeof(draw_buf));
+    lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_90);
+
+    // Initialize touch input
+    lv_indev_t * indev = lv_indev_create();
+    lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_read_cb(indev, touchscreen_read);
+
+    // Create the main GUI
+    create_main_gui();
 }
 
 void loop() {
-    // Add LVGL tick
-    lv_tick_inc(5);
+    static uint32_t last_update = 0;
     
-    // Read sensors every 2 seconds
-    if (millis() - state.last_sensor_read >= 2000) {
-        SensorData sensor_data = read_sensors();
-        state.temperature = sensor_data.temperature;
-        state.humidity = sensor_data.humidity;
-        state.pressure = sensor_data.pressure;
+    // Update environmental data every 2 seconds
+    if(millis() - last_update > 2000) {
+        float temperature = bme.readTemperature();
+        float humidity = bme.readHumidity();
         
-        update_sensor_displays(state.temperature, state.humidity, state.pressure);
-        state.last_sensor_read = millis();
+        // Update GUI with new sensor readings
+        update_environmental_data(temperature, humidity);
         
-        // Debug output
-        Serial.printf("Temp: %.1f°C, Humidity: %.1f%%, Pressure: %.1f hPa\n",
-                     state.temperature, state.humidity, state.pressure);
+        last_update = millis();
     }
 
-    // Handle LVGL tasks
     lv_timer_handler();
-    
-    // Small delay to prevent watchdog timer issues
+    lv_tick_inc(5);
     delay(5);
-}
-
-// Event callback implementations
-void led_btn_event_cb(lv_event_t * e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    if(code == LV_EVENT_CLICKED) {
-        state.led_active = !state.led_active;
-        setLED(state.led_active);
-        
-        // Update button state visually
-        lv_obj_t * btn = (lv_obj_t *)lv_event_get_target(e);
-        if(state.led_active) {
-            lv_obj_add_state(btn, LV_STATE_CHECKED);
-        } else {
-            lv_obj_clear_state(btn, LV_STATE_CHECKED);
-        }
-    }
-}
-
-void mist_btn_event_cb(lv_event_t * e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    if(code == LV_EVENT_CLICKED) {
-        state.mist_active = !state.mist_active;
-        setMist(state.mist_active);
-        
-        // Update button state visually
-        lv_obj_t * btn = (lv_obj_t *)lv_event_get_target(e);
-        if(state.mist_active) {
-            lv_obj_add_state(btn, LV_STATE_CHECKED);
-        } else {
-            lv_obj_clear_state(btn, LV_STATE_CHECKED);
-        }
-    }
-}
-
-void fan_slider_event_cb(lv_event_t * e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    if(code == LV_EVENT_VALUE_CHANGED) {
-        lv_obj_t * slider = (lv_obj_t *)lv_event_get_target(e);
-        int32_t value = lv_slider_get_value(slider);
-        state.fan_active = value > 0;
-        // Map 0-100 to 0-4095 for PWM
-        uint16_t pwm_value = map(value, 0, 100, 0, 4095);
-        setFan(pwm_value);
-    }
 }
